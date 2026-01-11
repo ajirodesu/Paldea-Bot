@@ -1,0 +1,20 @@
+{
+  "envCommands": {
+    "daily": {
+      "rewardDay1": {
+        "coin": 100,
+        "exp": 10
+      },
+      "rewardFirstDay": {
+        "coin": 100,
+        "exp": 10
+      }
+    },
+    "rank": {
+      "deltaNext": 5
+    },
+    "rankup": {
+      "deltaNext": 5
+    }
+  }
+}

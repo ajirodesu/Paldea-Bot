@@ -1,0 +1,21 @@
+{
+  "maintenance": false,
+  "maintenanceIgnore": [
+    "rules"
+  ],
+  "timezone": "Asia/Manila",
+  "symbol": "●",
+  "prefix": "#",
+  "subprefix": [
+    "+",
+    "-",
+    "."
+  ],
+  "developers": [
+    "7807647986"
+  ],
+  "vip": [
+    "7807647986"
+  ],
+  "neonDbUrl": "postgresql://neondb_owner:npg_izhJV6jYk1FO@ep-falling-violet-a1yzcrhy-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+}

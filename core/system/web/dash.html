@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Paldea | System Console</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        'mono': ['"JetBrains Mono"', 'monospace'],
+                        'sans': ['"Inter"', 'sans-serif']
+                    },
+                    colors: {
+                        surface: { 
+                            50: '#fafafa',
+                            100: '#f4f4f5', 
+                            800: '#27272a', 
+                            900: '#18181b', 
+                            950: '#09090b',
+                            black: '#000000'
+                        }
+                    },
+                    screens: {
+                        'xs': '475px',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Base Reset */
+        body { 
+            background-color: #000000; 
+            color: #e4e4e7; 
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 2px; }
+        ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+
+        /* Premium Card Architecture */
+        .premium-card {
+            background-color: #050505; 
+            border: 1px solid rgba(255,255,255,0.12);
+            box-shadow: 0 0 0 1px rgba(0,0,0,1);
+            transition: border-color 0.2s ease;
+        }
+
+        .premium-card.interactive:hover {
+            border-color: rgba(255,255,255,0.25);
+        }
+
+        /* Ambient Glow */
+        .ambient-glow {
+            position: fixed;
+            top: -20%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 1000px;
+            height: 600px;
+            background: radial-gradient(circle, rgba(255,255,255,0.04) 0%, transparent 70%);
+            z-index: -1;
+            pointer-events: none;
+        }
+
+        /* Inputs */
+        .cmd-input {
+            background: transparent;
+            border: none;
+            outline: none;
+            box-shadow: none;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .cmd-input::placeholder { color: #52525b; }
+
+        /* Loader */
+        #loader-screen {
+            position: fixed; inset: 0; z-index: 100; background: #000000;
+            display: flex; align-items: center; justify-content: center;
+            transition: opacity 0.4s ease;
+        }
+
+        /* Utility */
+        .sep-b { border-bottom: 1px solid rgba(255,255,255,0.12); }
+        .sep-t { border-top: 1px solid rgba(255,255,255,0.12); }
+
+        /* Text Truncation */
+        .truncate-safe {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+    </style>
+</head>
+<body class="selection:bg-indigo-500/30 selection:text-indigo-200 flex flex-col min-h-screen">
+
+    <div class="ambient-glow"></div>
+
+    <div id="loader-screen">
+        <div class="flex flex-col items-center gap-6">
+            <div class="w-16 h-[1px] bg-zinc-800 overflow-hidden relative">
+                <div class="absolute inset-0 w-full h-full bg-white animate-[shimmer_1s_infinite]"></div>
+            </div>
+            <span class="text-[10px] font-mono text-zinc-600 tracking-[0.4em] uppercase">Booting</span>
+        </div>
+    </div>
+
+    <nav class="sticky top-0 z-50 bg-[#000000]/80 backdrop-blur-xl border-b border-white/10">
+        <div class="max-w-[1400px] mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-4 h-4 bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center rounded-[1px]">
+                    <div class="w-2 h-2 bg-black"></div>
+                </div>
+                <div class="h-4 w-[1px] bg-zinc-800 hidden xs:block"></div>
+                <span class="font-bold text-sm tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-white to-zinc-400">PALDEA <span class="text-zinc-600 font-medium hidden xs:inline">INTERFACE</span></span>
+            </div>
+
+            <div class="flex items-center gap-4">
+                <div class="flex items-center gap-2 px-3 py-1 rounded bg-surface-900 border border-white/10">
+                    <div id="status-dot" class="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]"></div>
+                    <span id="status-text" class="text-[10px] font-mono text-emerald-400 font-bold">ONLINE</span>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="flex-grow max-w-[1400px] mx-auto w-full px-4 sm:px-6 py-6 sm:py-8 space-y-6 sm:space-y-8">
+
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+
+            <div class="premium-card interactive rounded p-3 sm:p-4 flex flex-col justify-between h-20 sm:h-24 group">
+                <div class="flex justify-between items-start">
+                    <span class="text-[9px] sm:text-[10px] font-sans font-medium text-cyan-400 uppercase tracking-wider group-hover:text-cyan-300 transition-colors">System Uptime</span>
+                    <i class="fas fa-clock text-cyan-500/50 text-xs group-hover:text-cyan-400 transition-colors"></i>
+                </div>
+                <div id="uptime" class="text-xs sm:text-sm font-mono text-white truncate-safe">00:00:00</div>
+            </div>
+
+            <div class="premium-card interactive rounded p-3 sm:p-4 flex flex-col justify-between h-20 sm:h-24 group">
+                <div class="flex justify-between items-start">
+                    <span class="text-[9px] sm:text-[10px] font-sans font-medium text-purple-400 uppercase tracking-wider group-hover:text-purple-300 transition-colors">Memory</span>
+                    <i class="fas fa-microchip text-purple-500/50 text-xs group-hover:text-purple-400 transition-colors"></i>
+                </div>
+                <div id="ram" class="text-xs sm:text-sm font-mono text-white truncate-safe">0 MB</div>
+            </div>
+
+            <div class="premium-card interactive rounded p-3 sm:p-4 flex flex-col justify-between h-20 sm:h-24 group">
+                <div class="flex justify-between items-start">
+                    <span class="text-[9px] sm:text-[10px] font-sans font-medium text-pink-400 uppercase tracking-wider group-hover:text-pink-300 transition-colors">Total Users</span>
+                    <i class="fas fa-users text-pink-500/50 text-xs group-hover:text-pink-400 transition-colors"></i>
+                </div>
+                <div id="user-count" class="text-xs sm:text-sm font-mono text-white truncate-safe">0</div>
+            </div>
+
+            <div class="premium-card interactive rounded p-3 sm:p-4 flex flex-col justify-between h-20 sm:h-24 group">
+                <div class="flex justify-between items-start">
+                    <span class="text-[9px] sm:text-[10px] font-sans font-medium text-amber-400 uppercase tracking-wider group-hover:text-amber-300 transition-colors">Groups</span>
+                    <i class="fas fa-layer-group text-amber-500/50 text-xs group-hover:text-amber-400 transition-colors"></i>
+                </div>
+                <div id="group-count" class="text-xs sm:text-sm font-mono text-white truncate-safe">0</div>
+            </div>
+
+            <div class="premium-card interactive rounded p-3 sm:p-4 flex flex-col justify-between h-20 sm:h-24 group">
+                <div class="flex justify-between items-start">
+                    <span class="text-[9px] sm:text-[10px] font-sans font-medium text-emerald-400 uppercase tracking-wider group-hover:text-emerald-300 transition-colors">Commands</span>
+                    <i class="fas fa-terminal text-emerald-500/50 text-xs group-hover:text-emerald-400 transition-colors"></i>
+                </div>
+                <div id="cmd-count" class="text-xs sm:text-sm font-mono text-white truncate-safe">0</div>
+            </div>
+
+            <div class="premium-card interactive rounded p-3 sm:p-4 flex flex-col justify-between h-20 sm:h-24 group">
+                <div class="flex justify-between items-start">
+                    <span class="text-[9px] sm:text-[10px] font-sans font-medium text-yellow-400 uppercase tracking-wider group-hover:text-yellow-300 transition-colors">Events</span>
+                    <i class="fas fa-bolt text-yellow-500/50 text-xs group-hover:text-yellow-400 transition-colors"></i>
+                </div>
+                <div id="evt-count" class="text-xs sm:text-sm font-mono text-white truncate-safe">0</div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
+
+            <div class="xl:col-span-2 space-y-6">
+
+                <div class="premium-card rounded-lg overflow-hidden flex flex-col shadow-lg shadow-black/50">
+
+                    <div class="px-5 py-3 sm:px-6 sm:py-4 sep-b bg-surface-950 flex justify-between items-center">
+                        <span class="text-xs font-bold text-indigo-400 tracking-wide uppercase flex items-center gap-2">
+                            <i class="fas fa-satellite-dish text-indigo-500"></i> Deploy Instance
+                        </span>
+                        <div class="flex items-center gap-2">
+                            <span class="text-[9px] font-mono text-indigo-300/50 border border-indigo-500/20 px-1.5 rounded bg-indigo-500/5">V3.0</span>
+                        </div>
+                    </div>
+
+                    <div class="p-5 sm:p-6 bg-[#030303]">
+                        <div class="flex flex-col gap-2">
+                            <label class="text-[9px] sm:text-[10px] font-mono text-zinc-500 uppercase tracking-wider ml-1">Configuration Token</label>
+                            <div class="group flex items-center gap-3 bg-[#080808] border border-white/10 rounded-md px-4 py-3 sm:py-4 transition-all focus-within:border-indigo-500/50 focus-within:bg-[#000000] focus-within:ring-1 focus-within:ring-indigo-500/20">
+                                <i class="fas fa-chevron-right text-[10px] text-zinc-600 group-focus-within:text-indigo-400 transition-colors"></i>
+                                <input type="text" id="token-input" placeholder="paste_telegram_bot_token..." class="cmd-input w-full text-xs text-zinc-300 focus:text-white transition-colors">
+                                <i class="fas fa-key text-zinc-800 text-xs group-focus-within:text-indigo-900 transition-colors"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="px-5 py-3 sm:px-6 sm:py-4 bg-surface-950 sep-t flex gap-3">
+
+                        <button onclick="handleToken('add')" class="flex-1 bg-[#0F0F11] hover:bg-[#1A1A1D] border border-white/10 hover:border-zinc-500 text-zinc-300 hover:text-white text-[10px] font-bold h-9 sm:h-10 rounded-[2px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 group">
+                            <i class="fas fa-power-off text-[9px] text-emerald-500 group-hover:text-emerald-400 shadow-[0_0_5px_rgba(16,185,129,0.5)]"></i> Initialize
+                        </button>
+
+                        <button onclick="handleToken('remove')" class="flex-1 bg-[#0F0F11] hover:bg-[#1A1A1D] border border-white/10 hover:border-zinc-500 text-zinc-300 hover:text-white text-[10px] font-bold h-9 sm:h-10 rounded-[2px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 group">
+                            <i class="fas fa-trash text-[9px] text-red-500 group-hover:text-red-400 shadow-[0_0_5px_rgba(239,68,68,0.5)]"></i> Terminate
+                        </button>
+
+                    </div>
+
+                    <div class="h-8 bg-black border-t border-white/5 flex items-center px-4 sm:px-6">
+                         <div class="flex items-center gap-2 w-full overflow-hidden">
+                            <span class="text-[10px] text-zinc-700 font-mono shrink-0">CONSOLE ></span>
+                            <span id="msg-box" class="text-[10px] font-mono text-zinc-500 truncate w-full transition-colors duration-300">ready for input...</span>
+                         </div>
+                    </div>
+                </div>
+
+                <div class="premium-card rounded-lg min-h-[300px] flex flex-col">
+                    <div class="px-5 py-3 sm:px-6 sm:py-4 sep-b bg-surface-950 flex justify-between items-center">
+                        <span class="text-xs font-bold text-teal-400 tracking-wide uppercase flex items-center gap-2">
+                             <i class="fas fa-network-wired text-teal-500"></i> Active Nodes
+                        </span>
+                        <span id="active-badge" class="text-[10px] font-mono text-teal-400/80 border border-teal-500/20 px-2 py-1 rounded bg-teal-500/5">0 ONLINE</span>
+                    </div>
+                    <div id="session-grid" class="flex flex-col">
+                        </div>
+                </div>
+            </div>
+
+            <div class="xl:col-span-1 space-y-6">
+
+                <div class="premium-card rounded-lg flex flex-col h-[500px] xl:h-[600px]">
+                    <div class="px-5 py-3 sm:px-6 sm:py-4 sep-b bg-surface-950 flex justify-between items-center">
+                        <span class="text-xs font-bold text-fuchsia-400 tracking-wide uppercase">Registry</span>
+                        <i class="fas fa-database text-fuchsia-500 text-xs"></i>
+                    </div>
+
+                    <div class="flex-1 overflow-y-auto custom-scrollbar bg-[#050505]">
+                        <div class="p-2">
+                            <div class="text-[9px] font-mono text-emerald-500/70 px-3 py-2 uppercase tracking-[0.2em] border-b border-white/5 mb-1 flex items-center gap-2">
+                                <i class="fas fa-terminal text-[8px]"></i> Commands
+                            </div>
+                            <div id="cmd-list" class="space-y-px"></div>
+
+                            <div class="h-6"></div> <div class="text-[9px] font-mono text-yellow-500/70 px-3 py-2 uppercase tracking-[0.2em] border-b border-white/5 mb-1 flex items-center gap-2">
+                                <i class="fas fa-bolt text-[8px]"></i> Events
+                            </div>
+                            <div id="evt-list" class="space-y-px"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="mt-auto border-t border-white/10 bg-[#000000] py-8">
+        <div class="max-w-[1400px] mx-auto px-6 flex flex-col sm:flex-row justify-between items-center gap-4 text-center sm:text-left">
+            <p class="text-[10px] text-zinc-600 font-mono">PALDEA SYSTEMS &copy; 2025</p>
+            <div class="flex gap-4 opacity-50">
+                <i class="fas fa-circle text-[3px] text-zinc-700"></i>
+                <i class="fas fa-circle text-[3px] text-zinc-700"></i>
+                <i class="fas fa-circle text-[3px] text-zinc-700"></i>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        let currentUptime = 0;
+        let uptimeInterval = null;
+
+        async function fetchStats() {
+            try {
+                const res = await fetch('/api/stats');
+                const data = await res.json();
+                updateDashboard(data);
+            } catch (e) {
+                // Silent fail for UI demo
+            }
+        }
+
+        function updateDashboard(data) {
+            currentUptime = Math.floor(data.uptime);
+
+            document.getElementById('ram').innerText = data.ram + ' MB';
+            document.getElementById('user-count').innerText = data.total_users.toLocaleString();
+            document.getElementById('group-count').innerText = data.total_groups.toLocaleString();
+            document.getElementById('cmd-count').innerText = data.commands.length;
+            document.getElementById('evt-count').innerText = data.events.length;
+            document.getElementById('active-badge').innerText = `${data.total_tokens} ONLINE`;
+
+            updateList('cmd-list', data.commands, 'terminal', 'text-emerald-500');
+            updateList('evt-list', data.events, 'bolt', 'text-yellow-500');
+            renderSessions(data.sessions);
+
+            setStatus("ONLINE", "bg-emerald-500", "text-emerald-400");
+        }
+
+        function setStatus(text, dotClass, textClass) {
+            document.getElementById('status-text').innerText = text;
+            document.getElementById('status-text').className = `text-[10px] font-mono font-bold ${textClass}`;
+            document.getElementById('status-dot').className = `w-1.5 h-1.5 rounded-full ${dotClass} shadow-[0_0_8px_#10b981]`;
+        }
+
+        function startUptimeClock() {
+            if(uptimeInterval) clearInterval(uptimeInterval);
+            uptimeInterval = setInterval(() => {
+                currentUptime++;
+                const d = Math.floor(currentUptime / 86400);
+                const h = Math.floor((currentUptime % 86400) / 3600);
+                const m = Math.floor((currentUptime % 3600) / 60);
+                const s = Math.floor(currentUptime % 60);
+                document.getElementById('uptime').innerText = `${d}d ${h}h ${m}m ${s}s`;
+            }, 1000);
+        }
+
+        function updateList(id, items, icon, colorClass) {
+            const el = document.getElementById(id);
+            if(el.childElementCount === items.length && items.length > 0) return;
+
+            if(items.length === 0) {
+                el.innerHTML = '<div class="px-3 py-2 text-[10px] font-mono text-zinc-700 italic">No Registry Data</div>';
+                return;
+            }
+
+            el.innerHTML = items.map(i => `
+                <div class="group flex items-center justify-between px-3 py-2.5 rounded hover:bg-surface-800 cursor-default transition-colors">
+                    <span class="text-[11px] font-mono text-zinc-400 group-hover:text-white transition-colors truncate">${i}</span>
+                    <i class="fas fa-${icon} text-[9px] opacity-40 group-hover:opacity-100 ${colorClass} transition-all"></i>
+                </div>
+            `).join('');
+        }
+
+        function renderSessions(sessions) {
+            const container = document.getElementById('session-grid');
+            if(sessions.length === 0) {
+                container.innerHTML = `
+                    <div class="flex-1 flex flex-col items-center justify-center p-8 opacity-40 min-h-[200px]">
+                        <div class="w-8 h-8 border border-white/10 rounded flex items-center justify-center mb-3 bg-black">
+                            <i class="fas fa-server text-zinc-600 text-xs"></i>
+                        </div>
+                        <span class="text-[10px] font-mono text-zinc-600">NO ACTIVE INSTANCES</span>
+                    </div>`;
+                return;
+            }
+
+            container.innerHTML = sessions.map(bot => {
+                const isOnline = bot.status === 'online';
+                const statusColor = isOnline ? 'bg-emerald-500' : 'bg-red-500';
+                const textColor = isOnline ? 'text-emerald-400' : 'text-red-400';
+
+                return `
+                <div class="px-5 py-4 border-b border-white/10 last:border-0 hover:bg-white/[0.02] transition-colors flex items-start gap-4 group">
+                    <div class="relative shrink-0">
+                        <img src="${bot.photo}" class="w-9 h-9 rounded-sm bg-zinc-900 object-cover ring-1 ring-white/10 ${isOnline ? '' : 'grayscale opacity-60'}">
+                        <div class="absolute -bottom-1 -right-1 w-2.5 h-2.5 bg-[#09090b] rounded-full flex items-center justify-center">
+                            <div class="w-1.5 h-1.5 rounded-full ${statusColor} shadow-[0_0_5px_currentColor] ${textColor}"></div>
+                        </div>
+                    </div>
+
+                    <div class="flex-1 min-w-0 pt-0.5">
+                        <div class="flex justify-between items-start">
+                            <div class="min-w-0">
+                                <h4 class="text-xs font-bold text-zinc-300 group-hover:text-teal-400 transition-colors leading-none truncate pr-2">${bot.first_name}</h4>
+                                <span class="text-[10px] font-mono text-zinc-600 block mt-1.5 truncate">@${bot.username}</span>
+                            </div>
+                            <div class="text-right shrink-0">
+                                <div class="text-[9px] font-mono text-zinc-600 bg-surface-900 px-1.5 py-0.5 rounded border border-white/5 group-hover:border-teal-500/20 group-hover:text-teal-400/70 transition-colors">ID: ${bot.id || '---'}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        async function handleToken(action) {
+            const input = document.getElementById('token-input');
+            const token = input.value.trim();
+            const msgEl = document.getElementById('msg-box');
+
+            // Reset style
+            msgEl.className = "text-[10px] font-mono text-zinc-500 truncate w-full transition-colors duration-300";
+
+            const showMsg = (text, type) => {
+                msgEl.innerText = text;
+                if(type === 'error') msgEl.classList.replace('text-zinc-500', 'text-red-400');
+                if(type === 'success') msgEl.classList.replace('text-zinc-500', 'text-emerald-400');
+                if(type === 'wait') msgEl.classList.replace('text-zinc-500', 'text-yellow-400');
+
+                if(type !== 'wait') {
+                    setTimeout(() => {
+                        msgEl.className = "text-[10px] font-mono text-zinc-500 truncate w-full transition-colors duration-300";
+                        msgEl.innerText = "ready for input...";
+                    }, 3000);
+                }
+            };
+
+            if(!token) return showMsg("err: null_input_value", 'error');
+
+            try {
+                showMsg("negotiating connection...", 'wait');
+
+                const res = await fetch('/api/token', {
+                    method: action === 'add' ? 'POST' : 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token })
+                });
+                const d = await res.json();
+
+                if(d.success) {
+                    showMsg("success: acknowledged", 'success');
+                    input.value = '';
+                    fetchStats();
+                } else {
+                    showMsg(`err: ${d.error}`, 'error');
+                }
+            } catch(e) {
+                showMsg("fatal: network_unreachable", 'error');
+            }
+        }
+
+        window.addEventListener('load', () => {
+            fetchStats();
+            startUptimeClock();
+            setInterval(fetchStats, 3000);
+
+            setTimeout(() => {
+                const loader = document.getElementById('loader-screen');
+                loader.style.opacity = '0';
+                setTimeout(() => loader.remove(), 500);
+            }, 1000);
+        });
+    </script>
+</body>
+</html>
