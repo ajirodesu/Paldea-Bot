@@ -125,7 +125,7 @@ const scripts = {
   async loadCommands() {
     await scanAndLoad(
       'commands',
-      'apps/scripts/commands',
+      'scripts/commands',
       global.paldea.commands,
       // Updated validation keys to match the new structure
       ['name', 'description', 'onStart']
@@ -137,7 +137,7 @@ const scripts = {
 
     await scanAndLoad(
       'events',
-      'apps/scripts/events',
+      'scripts/events',
       global.paldea.events,
       // Updated validation keys to match the new structure
       ['name', 'description', 'onEvent']

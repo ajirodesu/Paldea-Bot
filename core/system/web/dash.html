@@ -159,22 +159,6 @@
 
             <div class="premium-card interactive rounded p-3 sm:p-4 flex flex-col justify-between h-20 sm:h-24 group">
                 <div class="flex justify-between items-start">
-                    <span class="text-[9px] sm:text-[10px] font-sans font-medium text-pink-400 uppercase tracking-wider group-hover:text-pink-300 transition-colors">Total Users</span>
-                    <i class="fas fa-users text-pink-500/50 text-xs group-hover:text-pink-400 transition-colors"></i>
-                </div>
-                <div id="user-count" class="text-xs sm:text-sm font-mono text-white truncate-safe">0</div>
-            </div>
-
-            <div class="premium-card interactive rounded p-3 sm:p-4 flex flex-col justify-between h-20 sm:h-24 group">
-                <div class="flex justify-between items-start">
-                    <span class="text-[9px] sm:text-[10px] font-sans font-medium text-amber-400 uppercase tracking-wider group-hover:text-amber-300 transition-colors">Groups</span>
-                    <i class="fas fa-layer-group text-amber-500/50 text-xs group-hover:text-amber-400 transition-colors"></i>
-                </div>
-                <div id="group-count" class="text-xs sm:text-sm font-mono text-white truncate-safe">0</div>
-            </div>
-
-            <div class="premium-card interactive rounded p-3 sm:p-4 flex flex-col justify-between h-20 sm:h-24 group">
-                <div class="flex justify-between items-start">
                     <span class="text-[9px] sm:text-[10px] font-sans font-medium text-emerald-400 uppercase tracking-wider group-hover:text-emerald-300 transition-colors">Commands</span>
                     <i class="fas fa-terminal text-emerald-500/50 text-xs group-hover:text-emerald-400 transition-colors"></i>
                 </div>
@@ -303,8 +287,6 @@
             currentUptime = Math.floor(data.uptime);
 
             document.getElementById('ram').innerText = data.ram + ' MB';
-            document.getElementById('user-count').innerText = data.total_users.toLocaleString();
-            document.getElementById('group-count').innerText = data.total_groups.toLocaleString();
             document.getElementById('cmd-count').innerText = data.commands.length;
             document.getElementById('evt-count').innerText = data.events.length;
             document.getElementById('active-badge').innerText = `${data.total_tokens} ONLINE`;
