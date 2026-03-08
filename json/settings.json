@@ -5,7 +5,7 @@
   ],
   "timezone": "Asia/Manila",
   "symbol": "●",
-  "prefix": "#",
+  "prefix": "/",
   "subprefix": [
     "+",
     "-",
