@@ -132,6 +132,6 @@ dist
 # Replit debugger
 .breakpoints
 
-# Don't commit local API tokens
+# Project-specific sensitive files
 json/settings.json
 json/tokens.json
