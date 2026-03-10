@@ -3,8 +3,11 @@
   "maintenanceIgnore": [
     "rules"
   ],
+  "groqKey": "",
+  "groqModel": "llama-3.3-70b-versatile",
   "timezone": "Asia/Manila",
   "symbol": "●",
+  "owner": "Your-Name",
   "prefix": "/",
   "subprefix": [
     "+",
@@ -12,10 +15,10 @@
     "."
   ],
   "developers": [
-    "7807647986"
+    "Your-User-ID-Here"
   ],
   "vip": [
-    "7807647986"
+    "Your-User-ID-Here"
   ],
-  "neonDbUrl": "postgresql://neondb_owner:npg_izhJV6jYk1FO@ep-falling-violet-a1yzcrhy-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+  "neonDbUrl": "Your-NEON-DB-URL-HERE"
 }

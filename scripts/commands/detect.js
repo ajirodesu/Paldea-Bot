@@ -12,7 +12,7 @@ export const meta = {
   category: 'system',
   type: 'developer',
   cooldown: 0,
-  keywords: ['lance', 'wataru'] // Define keywords here
+  keywords: ['lance'] // Define keywords here
 };
 
 /**
