@@ -135,3 +135,5 @@ dist
 # Don't commit local API tokens
 json/tokens.jsonjson/settings.json
 json/settings.json
+json/tokens.json
+json/settings.js
