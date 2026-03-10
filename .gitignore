@@ -133,4 +133,4 @@ dist
 .breakpoints
 
 # Don't commit local API tokens
-json/tokens.json
+json/tokens.jsonjson/settings.json
