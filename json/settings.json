@@ -1,0 +1,24 @@
+{
+  "maintenance": false,
+  "maintenanceIgnore": [
+    "rules"
+  ],
+  "groqKey": "",
+  "groqModel": "llama-3.3-70b-versatile",
+  "timezone": "Asia/Manila",
+  "symbol": "●",
+  "owner": "your_name",
+  "prefix": "/",
+  "subprefix": [
+    "+",
+    "-",
+    "."
+  ],
+  "developers": [
+    "your_user_id_here"
+  ],
+  "vip": [
+    "your_user_id_here"
+  ],
+  "neonDbUrl": "your_neon_db_url_here"
+}
