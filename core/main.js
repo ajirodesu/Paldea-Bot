@@ -1,3 +1,4 @@
+// main.js
 import { starter } from './system/starter.js';
 import { install } from './utility/install.js';
 import log from './utility/log.js';
@@ -6,7 +7,6 @@ import fs from 'fs';
 
 // --- 1. Global Error Handling ---
 const catchError = (ctx, err) => log.error(`${ctx}:\n${err?.stack || err}`);
-
 process
   .on('unhandledRejection', (err) => catchError('Unhandled Rejection', err))
   .on('uncaughtException', (err) => catchError('Uncaught Exception', err));
@@ -17,39 +17,40 @@ global.log = log;
 // Load API keys
 let api = {};
 try {
-  if (fs.existsSync('./json/api.json')) {
-    api = JSON.parse(fs.readFileSync('./json/api.json', 'utf8'));
-  } else {
-    log.error('API file (./json/api.json) is missing.');
+  const apiPath = './json/api.json';
+  if (fs.existsSync(apiPath)) {
+    const raw = fs.readFileSync(apiPath, 'utf8');
+    api = JSON.parse(raw);
   }
-} catch (e) {
-  log.error('Error parsing API file:', e.message);
+} catch {
+  api = {};
 }
 
+// Load command settings (cmdset)
 let cmdset = {};
 try {
-  if (fs.existsSync('./json/cmdset.json')) {
-    api = JSON.parse(fs.readFileSync('./json/cmdset.json', 'utf8'));
+  const cmdsetPath = './json/cmdset.json';
+  if (fs.existsSync(cmdsetPath)) {
+    const raw = fs.readFileSync(cmdsetPath, 'utf8');
+    cmdset = JSON.parse(raw);
   } else {
-    log.error('API file (./json/cmdset.json) is missing.');
+    log.warn('Command settings file (./json/cmdset.json) is missing. Using empty defaults.');
   }
 } catch (e) {
-  log.error('Error parsing Command Settings file:', e.message);
+  log.error('Error parsing Command Settings file (./json/cmdset.json): ' + e.message);
+  cmdset = {};
 }
 
 // PERFORMANCE FIX: Load settings into memory ONCE
 let runtimeSettings = getSettings();
 
 global.paldea = {
-  // Getter returns the cached memory object (Fast)
-  get settings() { 
-    return runtimeSettings; 
+  get settings() {
+    return runtimeSettings;
   },
 
-  // Setter updates disk AND updates the cached memory object
-  set settings(partialConfig) { 
-    // setSettings returns the fully merged object
-    runtimeSettings = setSettings(partialConfig); 
+  set settings(partialConfig) {
+    runtimeSettings = setSettings(partialConfig);
   },
 
   commands:  new Map(),
@@ -72,7 +73,6 @@ Object.assign(global.paldea, {
 });
 
 // --- 3. System Boot ---
-
 async function main() {
   await starter();
   await install(global.log);

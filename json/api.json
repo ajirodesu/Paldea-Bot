@@ -1,4 +1,6 @@
 {
   "shin": "https://shin-apis.gleeze.com",
-  "nekolabs": "https://rynekoo-api.hf.space"
+  "nekolabs": "https://rynekoo-api.hf.space",
+  "deline": "https://api.deline.web.id",
+  "danzy": "https://api.danzy.web.id"
 }
