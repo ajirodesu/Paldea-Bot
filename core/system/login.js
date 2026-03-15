@@ -77,6 +77,108 @@ function getTokens() {
 }
 
 /**
+ * Registers or clears Telegram bot commands depending on the active prefix.
+ *
+ * - prefix === "/" → populate the command menu via setMyCommands
+ * - prefix !== "/" → wipe the command menu via deleteMyCommands so the
+ *                    "/" menu no longer appears while a custom prefix is active.
+ *                    The menu is automatically restored the next time the bot
+ *                    starts with prefix set back to "/".
+ */
+async function registerCommands(bot) {
+  const prefix = global.paldea.settings?.prefix || '/';
+
+  // ── Non-slash prefix: clear the Telegram command menu ──────────────────────
+  if (prefix !== '/') {
+    try {
+      await bot.deleteMyCommands();
+      log.login('Command menu cleared (prefix is not "/").');
+    } catch (err) {
+      log.error(`Failed to clear command menu: ${err.message}`);
+    }
+    return;
+  }
+
+  // ── Slash prefix: register all commands with Telegram ──────────────────────
+  const commands = global.paldea.commands;
+  if (!commands || typeof commands !== 'object') return;
+
+  // Support both Map and plain object
+  const commandList = commands instanceof Map
+    ? Array.from(commands.values())
+    : Object.values(commands);
+
+  const payload = commandList
+    .filter(cmd => cmd?.meta?.name && cmd?.meta?.description)
+    .map(cmd => ({
+      command: cmd.meta.name.toLowerCase().replace(/^\/+/, ''), // Strip any leading slash
+      description: cmd.meta.description,
+    }));
+
+  if (!payload.length) return;
+
+  try {
+    await bot.setMyCommands(payload);
+    log.login(`Registered ${payload.length} command(s) with Telegram.`);
+  } catch (err) {
+    log.error(`Failed to register commands: ${err.message}`);
+  }
+}
+
+/**
+ * Sets up the command dispatcher for a bot instance.
+ * Handles:
+ *   - /command
+ *   - /command@BotUsername  → only if username matches this bot
+ *   - /command@OtherBot     → silently ignored
+ */
+function setupCommandDispatcher(bot, me) {
+  bot.on('message', async (msg) => {
+    const prefix = global.paldea.settings?.prefix || '/';
+    const text = msg.text || msg.caption || '';
+
+    if (!text.startsWith(prefix)) return;
+
+    // Strip prefix, then split "commandName@username args..."
+    const withoutPrefix = text.slice(prefix.length).trim();
+    const [rawCommand, ...argParts] = withoutPrefix.split(/\s+/);
+
+    // Detect optional @username suffix on the command (e.g. "start@MyBot")
+    const atIndex = rawCommand.indexOf('@');
+    let commandName, targetUsername;
+
+    if (atIndex !== -1) {
+      commandName    = rawCommand.slice(0, atIndex).toLowerCase();
+      targetUsername = rawCommand.slice(atIndex + 1).toLowerCase();
+    } else {
+      commandName    = rawCommand.toLowerCase();
+      targetUsername = null;
+    }
+
+    // If a username is specified and it doesn't match this bot → ignore silently
+    if (targetUsername && targetUsername !== me.username.toLowerCase()) return;
+
+    const args = argParts; // Remaining words after the command token
+
+    // Look up command in global registry (supports Map or plain object)
+    const commands = global.paldea.commands;
+    if (!commands) return;
+
+    const commandEntry = commands instanceof Map
+      ? (commands.get(commandName) || commands.get(`${prefix}${commandName}`))
+      : (commands[commandName] || commands[`${prefix}${commandName}`]);
+
+    if (!commandEntry || typeof commandEntry.execute !== 'function') return;
+
+    try {
+      await commandEntry.execute({ bot, msg, args, log });
+    } catch (err) {
+      log.error(`Command "${commandName}" threw an error: ${err.message}`);
+    }
+  });
+}
+
+/**
  * Initializes a single bot instance.
  */
 async function startBotInstance(token, index) {
@@ -102,20 +204,26 @@ async function startBotInstance(token, index) {
       }
     });
 
-    // Default Start
+    // 3. Default Start
     bot.onText(/\/start/, (msg) => {
       const { prefix } = global.paldea.settings || { prefix: '/' };
       bot.sendMessage(msg.chat.id, `👋 **System Online**\nType \`${prefix}help\``, { parse_mode: 'Markdown' });
     });
 
-    // Custom Listeners
+    // 4. Auto Command Registration (only when prefix is "/")
+    await registerCommands(bot);
+
+    // 5. Command Dispatcher (handles prefix + optional @username routing)
+    setupCommandDispatcher(bot, me);
+
+    // 6. Custom Listeners
     await listen({ bot, log });
 
     log.login(`Bot instance ${index + 1} connected: @${me.username} (${maskedToken})`);
     return bot;
 
   } catch (err) {
-    // 3. Startup Error Handling (Auto-Purge if Invalid)
+    // Startup Error Handling (Auto-Purge if Invalid)
     if (err.message.includes('401') || err.message.includes('Unauthorized')) {
       log.error(`Startup Auth Failed: ${maskedToken}. Purging invalid token...`);
       await purgeToken(token);

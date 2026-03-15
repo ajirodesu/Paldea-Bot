@@ -1,225 +1,205 @@
 /**
  * @fileoverview Core Command Handler with Wataru AI
- * Now powered by Official Groq API (llama-3.3-70b-versatile) – fixed JSON + ultra-fast
+ * Powered by Official Groq API (llama-3.3-70b-versatile) – ultra-fast + JSON-guaranteed
+ *
+ * Improvements:
+ *  - Wataru detects natural language intent and maps to closest command automatically
+ *  - Robust JSON parsing with structured fallback
+ *  - AI call deduplication / per-user rate limiting (no spam)
+ *  - Full reply_to_message context extraction (text, photo, sticker, etc.)
+ *  - Fuzzy command name matching as a safety net after AI picks a wrong name
+ *  - Smart "did you mean?" suggestion on unknown prefixed commands
+ *  - Cleaner code structure with clear separation of concerns
  */
 
 import fetch from 'node-fetch';
 
+/* ======================== CONSTANTS ======================== */
+
 const SYMBOLS = {
-  usage: "▫️", 
-  error: "❌", 
-  warning: "⚠️", 
-  cooldown: "⏳", 
-  guide: "📄", 
-  unknown: "❓",
-  maintenance: "🚧"
+  usage:       "▫️",
+  error:       "❌",
+  warning:     "⚠️",
+  cooldown:    "⏳",
+  guide:       "📄",
+  unknown:     "❓",
+  maintenance: "🚧",
+  ai:          "🤖",
 };
 
-/* ====================== AI HELPER – Official Groq API ====================== */
-const GROQ_API_KEY = `${global.paldea.settings.groqKey}`; // ← PASTE YOUR KEY FROM console.groq.com (or set in settings)
+/** How many Wataru AI requests one user can make per minute. */
+const WATARU_RATE_LIMIT   = 5;
+const WATARU_RATE_WINDOW  = 60_000; // 1 minute in ms
 
-const callAI = async (text, systemPrompt, sessionId) => {
+/* ======================== SHARED STATE ======================== */
+
+/** Per-user AI call timestamps for rate limiting. */
+const wataruRateMap = new Map(); // userId → timestamp[]
+
+/* ======================== GROQ AI CLIENT ======================== */
+
+/**
+ * Calls the Groq API and returns the raw string response.
+ * Always requests `json_object` response format so output is valid JSON.
+ */
+const callAI = async (userText, systemPrompt) => {
+  const { groqKey, groqModel } = global.paldea.settings;
+
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${GROQ_API_KEY}`,
-      "Content-Type": "application/json"
+      "Authorization": `Bearer ${groqKey}`,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: `${global.paldea.settings.groqModel || "llama-3.3-70b-versatile"}`,  // Use setting or default fast model
+      model:           groqModel || "llama-3.3-70b-versatile",
+      temperature:     0.2,
+      max_tokens:      512,
+      response_format: { type: "json_object" },
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: text }
+        { role: "user",   content: userText      },
       ],
-      temperature: 0.3,
-      max_tokens: 400,
-      response_format: { type: "json_object" }  // ← Guarantees valid JSON!
-    })
+    }),
   });
 
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Groq API Error ${res.status}: ${err}`);
+    const errText = await res.text();
+    throw new Error(`Groq API ${res.status}: ${errText}`);
   }
 
   const data = await res.json();
   return data.choices[0].message.content;
 };
 
-/* ====================== WATARU AI HANDLER ====================== */
-const handleWataru = async ({ bot, msg, response, log }) => {
-  const { settings, commands: cmdMap, cooldowns } = global.paldea;
-  const body = msg.text.trim();
-  const isDev = settings.developers.includes(String(msg.from.id));
-  const fullName = msg.from.first_name + (msg.from.last_name ? ` ${msg.from.last_name}` : "");
-  const userId = msg.from.id;
+/* ======================== UTILITY HELPERS ======================== */
 
-  // Add context if there's a replied message (improvement: provide AI with more context for better decision-making)
-  let enhancedText = body;
-  if (msg.reply_to_message) {
-    const repliedUser = msg.reply_to_message.from;
-    const repliedName = repliedUser.first_name + (repliedUser.last_name ? ` ${repliedUser.last_name}` : "") || "Unknown";
-    const repliedText = msg.reply_to_message.text?.substring(0, 100) || "[non-text message]";
-    enhancedText += ` (This message is a reply to: "${repliedText}" from ${repliedName})`;
-  }
+/**
+ * Extracts a human-readable label from any Telegram message object.
+ * Handles text, caption, sticker, photo, video, audio, document, voice, etc.
+ */
+const extractMessageContext = (replyMsg) => {
+  if (!replyMsg) return null;
 
-  try {
-    // Build dynamic list of ALL commands (improvement: include category for better AI matching)
-    let commandList = "";
-    for (const [name, cmd] of cmdMap) {
-      const aliases = cmd.aliases ? cmd.aliases.join(", ") : "none";
-      const category = cmd.category ? cmd.category : "uncategorized";
-      commandList += `• ${name} | ${cmd.description || "No description"} | Category: ${category} | Aliases: ${aliases}\n`;
-    }
+  const sender = [replyMsg.from?.first_name, replyMsg.from?.last_name]
+    .filter(Boolean).join(" ") || "Unknown";
 
-    const systemPrompt = `You are Wataru, the smart AI assistant of the Paldea Telegram Bot.
-The user's name is ${fullName}.
-The user's ID is ${userId}.
+  let content = "[non-text content]";
+  if (replyMsg.text)            content = replyMsg.text.slice(0, 150);
+  else if (replyMsg.caption)    content = `[Image caption] ${replyMsg.caption.slice(0, 150)}`;
+  else if (replyMsg.sticker)    content = `[Sticker: ${replyMsg.sticker.emoji || "?"}]`;
+  else if (replyMsg.photo)      content = "[Photo]";
+  else if (replyMsg.video)      content = "[Video]";
+  else if (replyMsg.audio)      content = "[Audio]";
+  else if (replyMsg.document)   content = `[File: ${replyMsg.document.file_name || "unknown"}]`;
+  else if (replyMsg.voice)      content = "[Voice message]";
 
-Users mention "wataru" to invoke you. Analyze their natural language request.
-
-Here are ALL available commands:
-${commandList}
-
-Your job:
-- If the user's request clearly matches a command (by name, alias, description, or intent), output "execute_command" with the exact primary commandName (not alias) and extract args as an array of strings split by spaces or logically.
-- If it's casual chat, greeting, question, or doesn't match any command, output "respond" with a short, friendly reply. Use the user's name where appropriate to personalize.
-- If the user is asking for help, guide them to use the command.
-- If the user is asking for Developer or Owner name, respond with ${global.paldea.settings.owner}.
-- Consider if the message is a reply; commands like 'uid' can use the replied context automatically.
-- ALWAYS output ONLY valid JSON (no extra text, no markdown, no explanations).
-- Be precise: Only choose existing commands. Extract args accurately. If no args needed, use empty array.
-
-Examples:
-User: wataru get my user id
-{"action": "execute_command", "commandName": "uid", "args": []}
-
-User: wataru echo hello world
-{"action": "execute_command", "commandName": "echo", "args": ["hello", "world"]}
-
-User: wataru uid (This message is a reply to: "some message" from John)
-{"action": "execute_command", "commandName": "uid", "args": []}  // Command will handle the reply context
-
-User: hi wataru how are you
-{"action": "respond", "message": "Hi ${fullName}! I'm doing great, thanks for asking. How can I assist?"}
-
-User: wataru tell me a joke
-{"action": "respond", "message": "Why did the scarecrow win an award? Because he was outstanding in his field!"}
-`;
-
-    const aiText = await callAI(enhancedText, systemPrompt, `wataru_${msg.from.id}`);
-
-    // Parse JSON (native format ensures no errors)
-    const decision = JSON.parse(aiText);
-
-    if (decision.action === "execute_command" && decision.commandName) {
-      const cmdName = decision.commandName.toLowerCase().trim();
-
-      let selectedCmd = cmdMap.get(cmdName) ||
-                        [...cmdMap.values()].find(c => c.aliases?.includes(cmdName));
-
-      if (!selectedCmd) {
-        return response.reply(`${SYMBOLS.unknown} Wataru: Command "${cmdName}" not found. Try describing what you want!`);
-      }
-
-      // Maintenance check
-      if (settings.maintenance) {
-        const ignored = settings.maintenanceIgnore || [];
-        const whitelisted = ignored.includes(selectedCmd.name) ||
-                            (selectedCmd.aliases && selectedCmd.aliases.some(a => ignored.includes(a)));
-        if (!isDev && !whitelisted) {
-          return response.reply(`${SYMBOLS.maintenance} **System Under Maintenance**`);
-        }
-      }
-
-      // Permission + Cooldown
-      const level = selectedCmd.type || selectedCmd.access || "anyone";
-      if (!(await checkPermission(bot, msg, level))) {
-        if (level === "developer") return;
-        if (level === "administrator" && msg.chat.type === 'private') {
-          return response.reply(`${SYMBOLS.warning} This command cannot be used in private chats.`);
-        }
-        return response.reply(`${SYMBOLS.warning} Access Restricted: **${level.toUpperCase()}**`);
-      }
-
-      if (!isDev) {
-        if (handleCooldown({ msg, response, cooldowns }, selectedCmd)) return;
-      }
-
-      log.commands(`[WATARU AI] ${selectedCmd.name} executed by ${fullName}`);
-
-      const aiUsage = async () => {
-        if (!selectedCmd.guide) return;
-        const p = selectedCmd.prefix === false ? "" : settings.prefix;
-        const guides = (Array.isArray(selectedCmd.guide) ? selectedCmd.guide : [selectedCmd.guide])
-          .map(g => `\`${p}${selectedCmd.name} ${g}\``)
-          .join("\n");
-        return await response.reply(
-          `${SYMBOLS.usage} **Usage Guide:**\n\n${guides}\n\n${SYMBOLS.guide} ${selectedCmd.description || "No description."}`
-        );
-      };
-
-      await selectedCmd.onStart({
-        bot,
-        msg,
-        args: Array.isArray(decision.args) ? decision.args : (decision.args ? String(decision.args).split(/\s+/) : []),
-        response,
-        usage: aiUsage,
-        commandName: selectedCmd.name,
-        matches: settings.prefix
-      });
-
-    } else if (decision.action === "respond" && decision.message) {
-      await response.reply(decision.message);
-    } else {
-      await response.reply("🟢 **Wataru here!** Mention me to use any command naturally or just chat.");
-    }
-
-  } catch (error) {
-    log.error(`[WATARU AI] ${error.message}`);
-    await response.reply(`${SYMBOLS.error} Wataru had a problem: ${error.message}`);
-  }
+  return { sender, content };
 };
 
-/* ====================== ORIGINAL HELPERS (unchanged) ====================== */
+/**
+ * Parses a raw command token that may contain an @username suffix.
+ * Returns null if the @username does NOT match this bot → silently ignore.
+ */
+const parseCommandToken = (rawToken, botUsername) => {
+  const atIndex = rawToken.indexOf("@");
+  if (atIndex === -1) {
+    return { commandName: rawToken.toLowerCase(), targetUsername: null };
+  }
+
+  const commandName    = rawToken.slice(0, atIndex).toLowerCase();
+  const targetUsername = rawToken.slice(atIndex + 1).toLowerCase();
+
+  if (botUsername && targetUsername !== botUsername.toLowerCase()) return null;
+
+  return { commandName, targetUsername };
+};
+
+/**
+ * Finds the command that best fuzzy-matches a given name.
+ * Checks primary name, then aliases, then startsWith, then includes.
+ * Returns undefined if nothing is close enough.
+ */
+const fuzzyFindCommand = (name, cmdMap) => {
+  const n = name.toLowerCase().trim();
+
+  // Exact match
+  const exact = cmdMap.get(n);
+  if (exact) return exact;
+
+  // Alias match
+  const byAlias = [...cmdMap.values()].find(c => c.aliases?.includes(n));
+  if (byAlias) return byAlias;
+
+  // Starts-with match (e.g. "hel" → "help")
+  const startsWith = [...cmdMap.values()].find(c =>
+    c.name.startsWith(n) || c.aliases?.some(a => a.startsWith(n))
+  );
+  if (startsWith) return startsWith;
+
+  return undefined;
+};
+
+/**
+ * Returns up to `limit` command names that are similar to `input`
+ * using a simple character overlap heuristic — for "did you mean?" hints.
+ */
+const suggestCommands = (input, cmdMap, limit = 3) => {
+  const n = input.toLowerCase();
+  return [...cmdMap.keys()]
+    .map(name => {
+      let score = 0;
+      for (const ch of n) if (name.includes(ch)) score++;
+      return { name, score };
+    })
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(({ name }) => name);
+};
+
+/* ======================== PERMISSION & COOLDOWN ======================== */
+
 const checkPermission = async (bot, msg, level) => {
   const { settings } = global.paldea;
-  const senderId = String(msg.from.id);
-  const chatType = msg.chat.type;
+  const senderId     = String(msg.from.id);
+  const chatType     = msg.chat.type;
 
   const isDev = settings.developers.includes(senderId);
   const isVip = isDev || settings.vip.includes(senderId);
 
   switch (level) {
-    case 'developer': return isDev;
-    case 'vip':       return isVip;
-    case 'group':     return ['group', 'supergroup'].includes(chatType);
-    case 'private':   return chatType === 'private';
-    case 'administrator':
-      if (chatType === 'private') return false;
+    case "developer": return isDev;
+    case "vip":       return isVip;
+    case "group":     return ["group", "supergroup"].includes(chatType);
+    case "private":   return chatType === "private";
+    case "administrator":
+      if (chatType === "private") return false;
       if (isDev) return true;
       try {
         const member = await bot.getChatMember(msg.chat.id, senderId);
-        return ['creator', 'administrator'].includes(member.status);
+        return ["creator", "administrator"].includes(member.status);
       } catch { return false; }
-    case 'anyone':
-    default: return true;
+    default: return true; // "anyone"
   }
 };
 
-const handleCooldown = (context, command) => {
-  const { msg, response, cooldowns } = context;
+/**
+ * Returns true (and sends a reply) if the user is still on cooldown.
+ * Returns false if the command may proceed.
+ */
+const handleCooldown = ({ msg, response, cooldowns }, command) => {
   if (!command.cooldown) return false;
 
-  const key = `${msg.from.id}_${command.name}`;
-  const now = Date.now();
+  const key      = `${msg.from.id}_${command.name}`;
+  const now      = Date.now();
   const duration = command.cooldown * 1000;
 
   if (cooldowns.has(key)) {
-    const expiration = cooldowns.get(key) + duration;
-    if (now < expiration) {
-      const left = ((expiration - now) / 1000).toFixed(1);
-      response.reply(`${SYMBOLS.cooldown} Wait **${left}s** before using this again.`);
+    const expiry = cooldowns.get(key) + duration;
+    if (now < expiry) {
+      const left = ((expiry - now) / 1000).toFixed(1);
+      response.reply(`${SYMBOLS.cooldown} Please wait **${left}s** before using **${command.name}** again.`);
       return true;
     }
   }
@@ -229,106 +209,347 @@ const handleCooldown = (context, command) => {
   return false;
 };
 
-/* ====================== MAIN COMMAND HANDLER ====================== */
-export async function handleCommand({ bot, msg, response, log, userId }) {
-  if (!msg.text || msg.from.is_bot) return;
+/* ======================== WATARU AI HANDLER ======================== */
+
+/**
+ * Per-user rate limiting for Wataru AI calls.
+ * Returns true (blocked) if the user has exceeded WATARU_RATE_LIMIT calls
+ * within the last WATARU_RATE_WINDOW milliseconds.
+ */
+const isWataruRateLimited = (userId) => {
+  const now        = Date.now();
+  const timestamps = (wataruRateMap.get(userId) || []).filter(t => now - t < WATARU_RATE_WINDOW);
+
+  if (timestamps.length >= WATARU_RATE_LIMIT) return true;
+
+  timestamps.push(now);
+  wataruRateMap.set(userId, timestamps);
+  return false;
+};
+
+/**
+ * Builds a concise command catalogue string for the AI system prompt.
+ * Format: `name | description | category | aliases`
+ */
+const buildCommandCatalogue = (cmdMap) => {
+  const lines = [];
+  for (const [name, cmd] of cmdMap) {
+    const category = cmd.category || "general";
+    const aliases  = cmd.aliases?.join(", ") || "—";
+    const desc     = cmd.description || "No description";
+    lines.push(`${name} | ${desc} | category:${category} | aliases:${aliases}`);
+  }
+  return lines.join("\n");
+};
+
+/**
+ * Handles any message that invokes Wataru (via natural language).
+ * Calls the Groq API to decide whether to execute a command or respond conversationally.
+ */
+const handleWataru = async ({ bot, msg, response, log }) => {
+  const { settings, commands: cmdMap, cooldowns } = global.paldea;
+
+  const userId   = msg.from.id;
+  const isDev    = settings.developers.includes(String(userId));
+  const fullName = [msg.from.first_name, msg.from.last_name].filter(Boolean).join(" ");
+  const body     = msg.text?.trim() || "";
+
+  // Per-user rate limit (developers are exempt)
+  if (!isDev && isWataruRateLimited(userId)) {
+    return response.reply(
+      `${SYMBOLS.cooldown} You're using Wataru too fast! Please slow down a little.`
+    );
+  }
+
+  // Build context string — include reply context if present
+  let userContext = body;
+  const replyCtx  = extractMessageContext(msg.reply_to_message);
+  if (replyCtx) {
+    userContext += `\n[This message is a reply to "${replyCtx.content}" from ${replyCtx.sender}]`;
+  }
+
+  // Build the system prompt
+  const catalogue   = buildCommandCatalogue(cmdMap);
+  const ownerName   = settings.owner || "the bot owner";
+  const systemPrompt = `\
+You are Wataru, the intelligent assistant of the Paldea Telegram Bot.
+The user's name is "${fullName}" and their Telegram ID is ${userId}.
+
+## Your Task
+Analyze the user's natural-language message and decide ONE of two actions:
+
+1. **execute_command** – when the user's intent clearly maps to one of the available commands.
+   - Use the exact primary command name (never an alias).
+   - Extract args as a JSON array of strings. If no args are needed, use [].
+   - Even if the user only describes what they want (not the command name), infer the best command.
+
+2. **respond** – for greetings, questions, chit-chat, or when no command fits.
+   - Keep the reply concise, friendly, and personalized using the user's name.
+   - If asked about the owner or developer, answer: "${ownerName}".
+
+## Rules
+- Output ONLY a valid JSON object — no markdown, no code fences, no extra text.
+- Never invent command names. Only use names from the catalogue below.
+- If the user is replying to a message, use that context to understand the intent.
+- Prefer execute_command over respond whenever a command genuinely fits.
+
+## Available Commands
+${catalogue}
+
+## Output Format Examples
+{"action":"execute_command","commandName":"uid","args":[]}
+{"action":"execute_command","commandName":"echo","args":["hello","world"]}
+{"action":"respond","message":"Hi ${fullName}! I'm Wataru. How can I help you today?"}
+`;
+
+  try {
+    const raw      = await callAI(userContext, systemPrompt);
+    const decision = JSON.parse(raw);
+
+    /* ---- Execute a command ---- */
+    if (decision.action === "execute_command" && decision.commandName) {
+      const requestedName = decision.commandName.toLowerCase().trim();
+
+      // Primary lookup then fuzzy fallback
+      const selectedCmd =
+        cmdMap.get(requestedName) ||
+        [...cmdMap.values()].find(c => c.aliases?.includes(requestedName)) ||
+        fuzzyFindCommand(requestedName, cmdMap);
+
+      if (!selectedCmd) {
+        const suggestions = suggestCommands(requestedName, cmdMap, 3);
+        const hint = suggestions.length
+          ? `\nDid you mean: ${suggestions.map(s => `\`${s}\``).join(", ")}?`
+          : "";
+        return response.reply(
+          `${SYMBOLS.unknown} Wataru couldn't find a command called **${requestedName}**.${hint}`
+        );
+      }
+
+      // Maintenance check
+      if (settings.maintenance) {
+        const ignored      = settings.maintenanceIgnore || [];
+        const isWhitelisted =
+          ignored.includes(selectedCmd.name) ||
+          selectedCmd.aliases?.some(a => ignored.includes(a));
+
+        if (!isDev && !isWhitelisted) {
+          return response.reply(`${SYMBOLS.maintenance} **System Under Maintenance.** Please try again later.`);
+        }
+      }
+
+      // Permission check
+      const level = selectedCmd.type || selectedCmd.access || "anyone";
+      if (!(await checkPermission(bot, msg, level))) {
+        if (level === "developer") return;
+        if (level === "administrator" && msg.chat.type === "private") {
+          return response.reply(`${SYMBOLS.warning} This command can only be used in group chats.`);
+        }
+        return response.reply(`${SYMBOLS.warning} Access Restricted: **${level.toUpperCase()}**`);
+      }
+
+      // Cooldown check (developers are exempt)
+      if (!isDev && handleCooldown({ msg, response, cooldowns }, selectedCmd)) return;
+
+      log.commands(`[WATARU] "${selectedCmd.name}" triggered by ${fullName} (${userId})`);
+
+      // Build a usage helper specific to Wataru context
+      const aiUsage = async () => {
+        if (!selectedCmd.guide) return;
+        const p      = selectedCmd.prefix === false ? "" : settings.prefix;
+        const guides = (Array.isArray(selectedCmd.guide) ? selectedCmd.guide : [selectedCmd.guide])
+          .map(g => `\`${p}${selectedCmd.name} ${g}\``)
+          .join("\n");
+        await response.reply(
+          `${SYMBOLS.usage} **Usage Guide — ${selectedCmd.name}:**\n\n${guides}\n\n` +
+          `${SYMBOLS.guide} ${selectedCmd.description || "No description."}`
+        );
+      };
+
+      // Normalize args
+      const args = Array.isArray(decision.args)
+        ? decision.args.map(String)
+        : decision.args
+          ? String(decision.args).trim().split(/\s+/)
+          : [];
+
+      await selectedCmd.onStart({
+        bot,
+        msg,
+        args,
+        response,
+        usage:       aiUsage,
+        commandName: selectedCmd.name,
+        matches:     settings.prefix,
+      });
+
+    /* ---- Conversational response ---- */
+    } else if (decision.action === "respond" && decision.message) {
+      await response.reply(String(decision.message));
+
+    /* ---- Fallback if AI output was unexpected ---- */
+    } else {
+      await response.reply(
+        `${SYMBOLS.ai} **Wataru here!** Mention me and describe what you need, or type \`${settings.prefix}help\` to browse all commands.`
+      );
+    }
+
+  } catch (error) {
+    log.error(`[WATARU] ${error.message}`);
+    await response.reply(
+      `${SYMBOLS.error} Wataru ran into a problem. Please try again in a moment.\n\`${error.message}\``
+    );
+  }
+};
+
+/* ======================== MAIN COMMAND HANDLER ======================== */
+
+/**
+ * Entry point for every incoming message.
+ * Handles prefixed commands, @username commands, and Wataru natural language.
+ */
+export async function handleCommand({ bot, msg, response, log }) {
+  if (!msg?.text || msg.from?.is_bot) return;
 
   const { settings, commands, cooldowns } = global.paldea;
   const { prefix, subprefix } = settings;
-  const body = msg.text.trim();
+  const body   = msg.text.trim();
+  const isDev  = settings.developers.includes(String(msg.from.id));
 
-  const isDev = settings.developers.includes(String(msg.from.id));
-
-  const allPrefixes = [prefix, ...(subprefix || [])];
+  /* ------ Wataru natural language trigger (no prefix required) ------ */
+  // Must appear before prefix matching so "wataru …" messages without a prefix
+  // are correctly intercepted here rather than falling through to "unknown command".
+  const watTrigger = /\bwataru\b/i;
+  const allPrefixes = [prefix, ...(subprefix || [])].filter(Boolean);
   const matchedPrefix = allPrefixes.find(p => body.startsWith(p));
 
-  if (matchedPrefix && body === matchedPrefix) {
-    return response.reply(`🟢 **System Online.**\nType \`${matchedPrefix}help\` to see commands.`);
+  // If message mentions "wataru" but is NOT a prefixed command, route to AI handler.
+  if (!matchedPrefix && watTrigger.test(body)) {
+    return handleWataru({ bot, msg, response, log });
   }
 
-  let commandName, args;
-  let isPrefixed = !!matchedPrefix;
+  /* ------ Bare prefix (e.g. just "!") ------ */
+  if (matchedPrefix && body === matchedPrefix) {
+    return response.reply(
+      `🟢 **System Online.**\nType \`${matchedPrefix}help\` to see all available commands.`
+    );
+  }
 
-  if (isPrefixed) {
+  /* ------ Parse command name & args ------ */
+  let rawToken, args;
+
+  if (matchedPrefix) {
     const parts = body.slice(matchedPrefix.length).trim().split(/\s+/);
-    commandName = parts[0].toLowerCase();
-    args = parts.slice(1);
+    rawToken = parts[0];
+    args     = parts.slice(1);
   } else {
     const parts = body.split(/\s+/);
-    commandName = parts[0].toLowerCase();
-    args = parts.slice(1);
+    rawToken = parts[0];
+    args     = parts.slice(1);
   }
 
-  const command = commands.get(commandName) || 
-                  [...commands.values()].find(cmd => cmd.aliases?.includes(commandName));
+  /* ------ @username-aware token parsing ------ */
+  const botInstance  = [...(global.paldea.instances?.values() || [])].find(b => b._paldea_me);
+  const botUsername  = botInstance?._paldea_me?.username || "";
+  const parsed       = parseCommandToken(rawToken, botUsername);
 
+  // null → @username present but belongs to a different bot; silently ignore.
+  if (parsed === null) return;
+
+  const commandName = parsed.commandName;
+
+  /* ------ Resolve command ------ */
+  const command =
+    commands.get(commandName) ||
+    [...commands.values()].find(cmd => cmd.aliases?.includes(commandName));
+
+  /* ------ Command not found ------ */
   if (!command) {
-    if (body.toLowerCase().includes("wataru")) {
-      return await handleWataru({ bot, msg, response, log });
+    // Wataru via prefixed message: e.g. "!wataru ping my server"
+    if (watTrigger.test(body)) {
+      return handleWataru({ bot, msg, response, log });
     }
-    if (isPrefixed) {
-      if (commandName === "start") return; 
-      return response.reply(`${SYMBOLS.unknown} **Unknown Command**\n\`${commandName}\` not found.`);
+
+    if (matchedPrefix) {
+      // Ignore internal Telegram "/start" command
+      if (commandName === "start") return;
+
+      const suggestions = suggestCommands(commandName, commands, 3);
+      const hint = suggestions.length
+        ? `\n\nDid you mean: ${suggestions.map(s => `\`${matchedPrefix}${s}\``).join(", ")}?`
+        : `\n\nType \`${matchedPrefix}help\` to see all commands.`;
+
+      return response.reply(
+        `${SYMBOLS.unknown} **Unknown Command:** \`${commandName}\`${hint}`
+      );
     }
-    return;
+    return; // Unprefixed unknown command — silently ignore.
   }
 
+  /* ------ Maintenance check ------ */
   if (settings.maintenance) {
-    const ignoredCommands = settings.maintenanceIgnore || [];
-    const isWhitelisted = ignoredCommands.includes(command.name) || 
-                          (command.aliases && command.aliases.some(a => ignoredCommands.includes(a)));
+    const ignored      = settings.maintenanceIgnore || [];
+    const isWhitelisted =
+      ignored.includes(command.name) ||
+      command.aliases?.some(a => ignored.includes(a));
 
     if (!isDev && !isWhitelisted) {
-      return response.reply(`${SYMBOLS.maintenance} **System Under Maintenance**\nThe bot is currently being updated. Please try again later.`);
+      return response.reply(
+        `${SYMBOLS.maintenance} **System Under Maintenance.**\nThe bot is being updated. Please try again later.`
+      );
     }
   }
 
+  /* ------ Prefix requirement gate ------ */
+  const requiresPrefix = command.prefix ?? true;
+  if (requiresPrefix === true  && !matchedPrefix) return;
+  if (requiresPrefix === false && matchedPrefix)  return;
+
+  /* ------ Permission check ------ */
+  const level = command.type || command.access || "anyone";
+  if (!(await checkPermission(bot, msg, level))) {
+    if (level === "developer") return; // silently deny
+    if (level === "administrator" && msg.chat.type === "private") {
+      return response.reply(`${SYMBOLS.warning} This command can only be used in group chats.`);
+    }
+    return response.reply(`${SYMBOLS.warning} Access Restricted: **${level.toUpperCase()}**`);
+  }
+
+  /* ------ Cooldown check ------ */
+  if (!isDev && handleCooldown({ msg, response, cooldowns }, command)) return;
+
+  /* ------ Build usage helper ------ */
   const usage = async () => {
     if (!command.guide) return;
-    const p = command.prefix === false ? "" : (matchedPrefix || prefix);
+    const p      = command.prefix === false ? "" : (matchedPrefix || prefix);
     const guides = (Array.isArray(command.guide) ? command.guide : [command.guide])
       .map(g => `\`${p}${command.name} ${g}\``)
-      .join('\n');
-
-    return await response.reply(
-      `${SYMBOLS.usage} **Usage Guide:**\n\n${guides}\n\n${SYMBOLS.guide} ${command.description || "No description."}`
+      .join("\n");
+    await response.reply(
+      `${SYMBOLS.usage} **Usage Guide — ${command.name}:**\n\n${guides}\n\n` +
+      `${SYMBOLS.guide} ${command.description || "No description."}`
     );
   };
 
+  /* ------ Execute ------ */
   try {
-    const requiresPrefix = command.prefix ?? true; 
-    if (requiresPrefix === true && !isPrefixed) return; 
-    if (requiresPrefix === false && isPrefixed) return; 
+    const fullName = [msg.from.first_name, msg.from.last_name].filter(Boolean).join(" ");
+    log.commands(`"${command.name}" called by ${fullName} (${msg.from.id})`);
 
-    const level = command.type || command.access || 'anyone';
-    if (!(await checkPermission(bot, msg, level))) {
-      if (level === 'developer') return; 
-      if (level === 'administrator' && msg.chat.type === 'private') {
-        return response.reply(`${SYMBOLS.warning} This command cannot be used in private chats.`);
-      }
-      return response.reply(`${SYMBOLS.warning} Access Restricted: **${level.toUpperCase()}**`);
-    }
-
-    if (!isDev) {
-      if (handleCooldown({ msg, response, cooldowns }, command)) return;
-    }
-
-    const fullName = msg.from.first_name + (msg.from.last_name ? ` ${msg.from.last_name}` : "");
-
-    log.commands(`${command.name} called by ${fullName}`);
-
-    await command.onStart({ 
-      bot, 
-      msg, 
-      args, 
-      response, 
-      usage, 
-      commandName, 
-      matches: matchedPrefix 
+    await command.onStart({
+      bot,
+      msg,
+      args,
+      response,
+      usage,
+      commandName,
+      matches: matchedPrefix,
     });
 
   } catch (error) {
     log.error(`[${commandName}] Runtime Error: ${error.message}`);
-    await response.reply(`${SYMBOLS.error} **System Error:**\n\`${error.message}\``);
+    await response.reply(
+      `${SYMBOLS.error} **Runtime Error in \`${commandName}\`:**\n\`${error.message}\``
+    );
   }
 }

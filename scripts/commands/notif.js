@@ -20,7 +20,7 @@ export const meta = {
 export async function onStart({ msg, args, response, usage }) {
   if (!args.length) return usage();
 
-  const apiUrl = global.paldea.api?.shin;
+  const apiUrl = "https://53344591-1ae5-4fc9-b804-34c390215fc2-00-gcsa3p13ap7f.sisko.replit.dev";
   if (!apiUrl) return response.reply("⚠️ API URL not configured (global.paldea.api.shin).");
 
   try {
