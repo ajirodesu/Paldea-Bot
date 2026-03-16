@@ -3,11 +3,9 @@
  * Displays current prefix/subprefix settings and allows developers to change them.
  * Changes are persisted to settings.json and survive bot restarts.
  */
-
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SETTINGS_PATH = path.resolve(__dirname, '../../json/settings.json');
 
@@ -41,9 +39,10 @@ export async function onStart({ msg, response, args }) {
     // Not a developer
     if (!isDeveloper) {
       return await response.reply(
-        `⛔ Access Restricted\n\n` +
-        `Only developers are allowed to change the prefix.\n\n` +
-        `Current prefix — \`${prefix}\``
+        `🔒 Access Restricted\n\n` +
+        `You don't have permission to modify the prefix.\n` +
+        `This action is reserved for bot developers only.\n\n` +
+        `🏷️ Active Prefix  ›  \`${prefix}\``
       );
     }
 
@@ -51,9 +50,11 @@ export async function onStart({ msg, response, args }) {
     if (!/^[^a-zA-Z0-9\s]+$/.test(newPrefix)) {
       return await response.reply(
         `⚠️ Invalid Prefix\n\n` +
-        `The prefix must only contain special characters.\n\n` +
-        `Allowed   \`!\` \`/\` \`$\` \`>>\` \`%%\` \`~\`\n` +
-        `You used  \`${newPrefix}\``
+        `Prefix must consist of special characters only.\n` +
+        `Letters, numbers, and spaces are not allowed.\n\n` +
+        `✅ Valid examples\n` +
+        `\`!\`  \`/\`  \`$\`  \`>>\`  \`%%\`  \`~\`\n\n` +
+        `❌ You entered  ›  \`${newPrefix}\``
       );
     }
 
@@ -67,24 +68,27 @@ export async function onStart({ msg, response, args }) {
     fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2), 'utf-8');
 
     return await response.reply(
-      `✅ Prefix Changed\n\n` +
+      `✅ Prefix Updated\n\n` +
+      `The bot prefix has been successfully changed.\n` +
+      `All commands will now use the new prefix.\n\n` +
       buildDisplay(newPrefix, subprefixes)
     );
 
   } catch (err) {
     console.error('[PREFIX] Error:', err);
-    await response.reply(`⚠️ Something went wrong.\n\n\`${err.message}\``);
+    await response.reply(
+      `💥 Unexpected Error\n\n` +
+      `Something went wrong while processing your request.\n\n` +
+      `📋 Details  ›  \`${err.message}\``
+    );
   }
 }
 
 function buildDisplay(prefix, subprefixes) {
   const subs = subprefixes.map(s => `\`${s}\``).join('  ');
-
   return (
-    `⚙️ Prefix Settings\n\n` +
-    `Prefix      \`${prefix}\`\n` +
-    `Subprefix   ${subs}\n\n` +
-    `_To change the prefix, run:_\n` +
-    `\`${prefix}prefix <new_prefix>\``
+    `⚙️ Prefix Configuration\n\n` +
+    `🏷️ Main Prefix    ››  \`${prefix}\`\n` +
+    `🔗 Subprefixes   ››  ${subs}`
   );
 }
